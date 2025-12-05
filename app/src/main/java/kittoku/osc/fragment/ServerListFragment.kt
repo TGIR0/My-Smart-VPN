@@ -1,96 +1,89 @@
 package kittoku.osc.fragment
 
-import android.app.Activity
-import android.content.Intent
-import android.net.VpnService
+import android.content.SharedPreferences
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
-import androidx.activity.result.contract.ActivityResultContracts
+import android.widget.Toast
 import androidx.fragment.app.Fragment
 import androidx.preference.PreferenceManager
+import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.RecyclerView
+import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
+import kittoku.osc.R
 import kittoku.osc.adapter.ServerListAdapter
-import kittoku.osc.databinding.FragmentServerListBinding
 import kittoku.osc.preference.OscPrefKey
-import kittoku.osc.repository.SstpServer
+import kittoku.osc.preference.accessor.setBooleanPrefValue
+import kittoku.osc.preference.accessor.setIntPrefValue
+import kittoku.osc.preference.accessor.setStringPrefValue
 import kittoku.osc.repository.VpnRepository
-import kittoku.osc.service.ACTION_VPN_CONNECT
-import kittoku.osc.service.SstpVpnService
 
 class ServerListFragment : Fragment() {
-    private var _binding: FragmentServerListBinding? = null
-    private val binding get() = _binding!!
+    private lateinit var repository: VpnRepository
+    private lateinit var adapter: ServerListAdapter
+    private lateinit var prefs: SharedPreferences
+    private lateinit var swipeRefresh: SwipeRefreshLayout
 
-    private lateinit var listAdapter: ServerListAdapter
-    private val vpnRepository = VpnRepository()
-
-    private val vpnPermissionLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-        if (result.resultCode == Activity.RESULT_OK) {
-            startVpn()
-        }
-    }
-
-    override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View {
-        _binding = FragmentServerListBinding.inflate(inflater, container, false)
-        return binding.root
+    override fun onCreateView(
+        inflater: LayoutInflater, container: ViewGroup?,
+        savedInstanceState: Bundle?
+    ): View? {
+        return inflater.inflate(R.layout.fragment_server_list, container, false)
     }
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
 
-        setupRecyclerView()
+        repository = VpnRepository()
+        prefs = PreferenceManager.getDefaultSharedPreferences(requireContext())
 
-        binding.swipeRefreshLayout.setOnRefreshListener { fetchServers() }
+        // تنظیم لیست
+        val recyclerView = view.findViewById<RecyclerView>(R.id.recyclerViewServers)
+        recyclerView.layoutManager = LinearLayoutManager(requireContext())
 
-        fetchServers()
-    }
-
-    private fun setupRecyclerView() {
-        listAdapter = ServerListAdapter { server ->
-            prepareAndStartVpn(server)
+        adapter = ServerListAdapter(emptyList()) { server ->
+            // وقتی روی سرور کلیک شد:
+            saveAndConnect(server)
         }
-        binding.recyclerView.adapter = listAdapter
+        recyclerView.adapter = adapter
+
+        // تنظیم رفرش
+        swipeRefresh = view.findViewById(R.id.swipeRefresh)
+        swipeRefresh.setOnRefreshListener {
+            loadServers()
+        }
+
+        // لود اولیه
+        loadServers()
     }
 
-    private fun fetchServers() {
-        binding.progressBar.visibility = View.VISIBLE
-        binding.swipeRefreshLayout.isRefreshing = true
-
-        vpnRepository.fetchSstpServers { servers ->
+    private fun loadServers() {
+        swipeRefresh.isRefreshing = true
+        repository.fetchSstpServers { servers ->
             activity?.runOnUiThread {
-                listAdapter.updateData(servers)
-                binding.progressBar.visibility = View.GONE
-                binding.swipeRefreshLayout.isRefreshing = false
+                swipeRefresh.isRefreshing = false
+                if (servers.isNotEmpty()) {
+                    adapter.updateList(servers)
+                } else {
+                    Toast.makeText(context, "No servers found", Toast.LENGTH_SHORT).show()
+                }
             }
         }
     }
 
-    private fun prepareAndStartVpn(server: SstpServer) {
-        val prefs = PreferenceManager.getDefaultSharedPreferences(requireContext())
-        prefs.edit().also { 
-            it.putString(OscPrefKey.HOST_ADDRESS.name, server.hostName)
-            it.putString(OscPrefKey.SSL_PORT.name, "443")
-            it.putString(OscPrefKey.PPP_USERNAME.name, "vpn")
-            it.putString(OscPrefKey.PPP_PASSWORD.name, "vpn")
-            it.apply()
-        }
+    private fun saveAndConnect(server: kittoku.osc.repository.SstpServer) {
+        // ذخیره اطلاعات سرور در تنظیمات اصلی برنامه
+        // از کلیدهای استاندارد پروژه استفاده می‌کنیم
+        setStringPrefValue(server.hostName, OscPrefKey.HOME_HOSTNAME, prefs)
+        setStringPrefValue("vpn", OscPrefKey.HOME_USERNAME, prefs)
+        setStringPrefValue("vpn", OscPrefKey.HOME_PASSWORD, prefs)
+        setBooleanPrefValue(true, OscPrefKey.SSL_DO_VERIFY, prefs) // فعال سازی وریفای (یا فالس اگر ارور داد)
+        setIntPrefValue(443, OscPrefKey.SSL_PORT, prefs)
 
-        val intent = VpnService.prepare(context)
-        if (intent != null) {
-            vpnPermissionLauncher.launch(intent)
-        } else {
-            startVpn()
-        }
-    }
+        Toast.makeText(context, "Selected: ${server.hostName}", Toast.LENGTH_SHORT).show()
 
-    private fun startVpn() {
-        val intent = Intent(requireContext(), SstpVpnService::class.java).setAction(ACTION_VPN_CONNECT)
-        requireContext().startService(intent)
-    }
-
-    override fun onDestroyView() {
-        super.onDestroyView()
-        _binding = null
+        // بازگشت به صفحه اصلی برای اتصال
+        parentFragmentManager.popBackStack()
     }
 }
