@@ -37,7 +37,7 @@ class ServerListAdapter(
     override fun onBindViewHolder(holder: ServerViewHolder, position: Int) {
         val server = serverList[position]
 
-        holder.txtFlag.text = getFlagEmoji(server.countryShort)
+        holder.txtFlag.text = getFlagEmoji(server.countryCode)
         holder.txtHost.text = server.hostName
 
         val speedMbps = server.speed / 1000000
