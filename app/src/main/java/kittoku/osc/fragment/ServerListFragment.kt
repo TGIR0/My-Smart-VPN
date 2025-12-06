@@ -3,9 +3,7 @@ package kittoku.osc.fragment
 import android.content.Intent
 import android.content.SharedPreferences
 import android.os.Bundle
-import android.view.LayoutInflater
 import android.view.View
-import android.view.ViewGroup
 import android.widget.Toast
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
@@ -19,22 +17,18 @@ import kittoku.osc.preference.OscPrefKey
 import kittoku.osc.preference.accessor.setBooleanPrefValue
 import kittoku.osc.preference.accessor.setIntPrefValue
 import kittoku.osc.preference.accessor.setStringPrefValue
+import kittoku.osc.repository.SstpServer
 import kittoku.osc.repository.VpnRepository
 import kittoku.osc.service.ACTION_VPN_CONNECT
 import kittoku.osc.service.SstpVpnService
 
-class ServerListFragment : Fragment() {
+class ServerListFragment : Fragment(R.layout.fragment_server_list) {
+    private var swipeRefresh: SwipeRefreshLayout? = null
+    private var recyclerViewServers: RecyclerView? = null
+
     private lateinit var repository: VpnRepository
     private lateinit var adapter: ServerListAdapter
     private lateinit var prefs: SharedPreferences
-    private lateinit var swipeRefresh: SwipeRefreshLayout
-
-    override fun onCreateView(
-        inflater: LayoutInflater, container: ViewGroup?,
-        savedInstanceState: Bundle?
-    ): View? {
-        return inflater.inflate(R.layout.fragment_server_list, container, false)
-    }
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
@@ -42,25 +36,33 @@ class ServerListFragment : Fragment() {
         repository = VpnRepository()
         prefs = PreferenceManager.getDefaultSharedPreferences(requireContext())
 
-        val recyclerView = view.findViewById<RecyclerView>(R.id.recyclerViewServers)
-        recyclerView.layoutManager = LinearLayoutManager(requireContext())
+        swipeRefresh = view.findViewById(R.id.swipeRefresh)
+        recyclerViewServers = view.findViewById(R.id.recyclerViewServers)
+
+        recyclerViewServers?.layoutManager = LinearLayoutManager(requireContext())
 
         adapter = ServerListAdapter(emptyList()) { server ->
             connectToServer(server)
         }
-        recyclerView.adapter = adapter
+        recyclerViewServers?.adapter = adapter
 
-        swipeRefresh = view.findViewById(R.id.swipeRefresh)
-        swipeRefresh.setOnRefreshListener { loadServers() }
+        swipeRefresh?.setOnRefreshListener { loadServers() }
 
         loadServers()
     }
 
+    override fun onDestroyView() {
+        super.onDestroyView()
+        // Clean up view references to avoid memory leaks
+        swipeRefresh = null
+        recyclerViewServers = null
+    }
+
     private fun loadServers() {
-        swipeRefresh.isRefreshing = true
+        swipeRefresh?.isRefreshing = true
         repository.fetchSstpServers { servers ->
             activity?.runOnUiThread {
-                swipeRefresh.isRefreshing = false
+                swipeRefresh?.isRefreshing = false
                 if (servers.isNotEmpty()) {
                     adapter.updateList(servers)
                 } else {
@@ -70,8 +72,8 @@ class ServerListFragment : Fragment() {
         }
     }
 
-    private fun connectToServer(server: kittoku.osc.repository.SstpServer) {
-        // 1. ذخیره تنظیمات سرور در SharedPreferences
+    private fun connectToServer(server: SstpServer) {
+        // 1. Save server settings to SharedPreferences
         setStringPrefValue(server.hostName, OscPrefKey.HOME_HOSTNAME, prefs)
         setStringPrefValue("vpn", OscPrefKey.HOME_USERNAME, prefs)
         setStringPrefValue("vpn", OscPrefKey.HOME_PASSWORD, prefs)
@@ -80,7 +82,7 @@ class ServerListFragment : Fragment() {
 
         Toast.makeText(context, "Connecting to ${server.country}...", Toast.LENGTH_SHORT).show()
 
-        // 2. ارسال دستور اتصال به سرویس
+        // 2. Send connect command to the service
         val intent = Intent(requireContext(), SstpVpnService::class.java).apply {
             action = ACTION_VPN_CONNECT
         }
