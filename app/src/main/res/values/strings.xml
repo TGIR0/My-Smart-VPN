@@ -1,4 +1,8 @@
 <resources>
     <string name="app_name">Open SSTP Client</string>
     <string name="connect">Connect</string>
+    <string name="navigation_drawer_open">Open navigation drawer</string>
+    <string name="navigation_drawer_close">Close navigation drawer</string>
+    <string name="home">Home</string>
+    <string name="settings">Settings</string>
 </resources>
