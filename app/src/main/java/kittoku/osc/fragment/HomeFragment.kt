@@ -48,12 +48,14 @@ class HomeFragment : PreferenceFragmentCompat() {
 
     private fun attachConnectorListener() {
         findPreference<HomeConnectorPreference>(OscPrefKey.HOME_CONNECTOR.name)!!.also {
-            it.onPreferenceChangeListener = Preference.OnPreferenceChangeListener { _, newState ->
+            it.onPreferenceChangeListener = Preference.OnPreferenceChangeListener { preference, newState ->
                 if (newState == true) {
                     checkPreferences(preferenceManager.sharedPreferences!!)?.also { message ->
                         toastInvalidSetting(message, requireContext())
                         return@OnPreferenceChangeListener false
                     }
+
+                    (preference as HomeConnectorPreference).summary = "Connecting..."
 
                     VpnService.prepare(requireContext())?.also { intent ->
                         preparationLauncher.launch(intent)

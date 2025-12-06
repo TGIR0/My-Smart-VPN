@@ -8,8 +8,8 @@ import androidx.core.view.GravityCompat
 import androidx.drawerlayout.widget.DrawerLayout
 import com.google.android.material.navigation.NavigationView
 import kittoku.osc.R
+import kittoku.osc.fragment.HomeFragment
 import kittoku.osc.fragment.ServerListFragment
-import kittoku.osc.fragment.SettingsFragment
 
 class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelectedListener {
     private lateinit var drawerLayout: DrawerLayout
@@ -33,7 +33,7 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
 
         if (savedInstanceState == null) {
             supportFragmentManager.beginTransaction()
-                .replace(R.id.fragment_container, ServerListFragment()).commit()
+                .replace(R.id.fragment_container, HomeFragment()).commit()
             navigationView.setCheckedItem(R.id.nav_home)
         }
     }
@@ -41,9 +41,9 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
     override fun onNavigationItemSelected(item: MenuItem): Boolean {
         when (item.itemId) {
             R.id.nav_home -> supportFragmentManager.beginTransaction()
-                .replace(R.id.fragment_container, ServerListFragment()).commit()
-            R.id.nav_settings -> supportFragmentManager.beginTransaction()
-                .replace(R.id.fragment_container, SettingsFragment()).addToBackStack(null).commit()
+                .replace(R.id.fragment_container, HomeFragment()).commit()
+            R.id.nav_server_list -> supportFragmentManager.beginTransaction()
+                .replace(R.id.fragment_container, ServerListFragment()).addToBackStack(null).commit()
         }
         drawerLayout.closeDrawer(GravityCompat.START)
         return true
