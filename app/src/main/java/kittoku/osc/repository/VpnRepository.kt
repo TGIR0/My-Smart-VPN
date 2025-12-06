@@ -36,17 +36,19 @@ class VpnRepository {
 
     private fun parseCsv(data: String): List<SstpServer> {
         val servers = mutableListOf<SstpServer>()
-        val lines = data.split("\n")
+        val lines = data.split('\n').filter { it.isNotBlank() }
 
         for (line in lines) {
-            if (line.startsWith("#") || line.isEmpty() || line.startsWith("*")) continue
+            if (line.startsWith("#") || line.startsWith("*")) continue
 
             val p = line.split(",")
 
-            if (p.size > 12) {
+            if (p.size > 13) { // Use a safer size check
                 try {
-                    val isSstp = p.size > 12 && p[12] == "1"
-                    val countryCode = if (p.size > 6) p[6] else ""
+                    // The original isSstp check was incorrect for the provided CSV format.
+                    // For now, we assume all servers from this list are potential SSTP servers.
+                    val isSstp = true
+                    val countryCode = p[6]
 
                     if (isSstp && !countryCode.equals("IR", ignoreCase = true)) {
 
@@ -66,6 +68,7 @@ class VpnRepository {
                         ))
                     }
                 } catch (e: Exception) {
+                  // silent catch
                 }
             }
         }
