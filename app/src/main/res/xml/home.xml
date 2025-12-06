@@ -1,9 +1,29 @@
 <?xml version="1.0" encoding="utf-8"?>
-<PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android">
+<PreferenceScreen xmlns:app="http://schemas.android.com/apk/res-auto">
+    <kittoku.osc.preference.custom.HomeConnectorPreference
+        app:key="HOME_CONNECTOR"
+        app:iconSpaceReserved="false" />
 
-    <Preference
-        android:key="theme"
-        android:title="Theme"
-        android:summary="Change the app theme" />
+    <PreferenceCategory
+        app:key="HOME_CATEGORY_STATUS"
+        app:title="STATUS"
+        app:iconSpaceReserved="false">
 
+        <kittoku.osc.preference.custom.HomeStatusPreference
+            app:key="HOME_STATUS"
+            app:iconSpaceReserved="false"
+            app:selectable="false" />
+
+    </PreferenceCategory>
+
+    <PreferenceCategory
+        app:key="HOME_CATEGORY_LOG"
+        app:title="LOG"
+        app:iconSpaceReserved="false">
+
+        <kittoku.osc.preference.custom.HomeLogPreference
+            app:key="HOME_LOG"
+            app:iconSpaceReserved="false" />
+
+    </PreferenceCategory>
 </PreferenceScreen>
