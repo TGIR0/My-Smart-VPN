@@ -29,8 +29,18 @@ class ServerListFragment : Fragment(R.layout.fragment_server_list) {
         val serversRecyclerView = view.findViewById<RecyclerView>(R.id.servers_recycler_view)
         serversRecyclerView.layoutManager = LinearLayoutManager(context)
 
+        // Initialize adapter with an empty list
+        serverListAdapter = ServerListAdapter(mutableListOf()) { server ->
+            setStringPrefValue(server.hostName, OscPrefKey.HOME_HOSTNAME, prefs)
+            setStringPrefValue("vpn", OscPrefKey.HOME_USERNAME, prefs)
+            setStringPrefValue("vpn", OscPrefKey.HOME_PASSWORD, prefs)
+            findNavController().navigateUp()
+        }
+        serversRecyclerView.adapter = serverListAdapter
+
         swipeRefreshLayout.setOnRefreshListener { loadServers() }
 
+        // Load initial data
         loadServers()
     }
 
@@ -38,13 +48,7 @@ class ServerListFragment : Fragment(R.layout.fragment_server_list) {
         swipeRefreshLayout.isRefreshing = true
         vpnRepository.fetchSstpServers { servers ->
             activity?.runOnUiThread {
-                serverListAdapter = ServerListAdapter(servers) { server ->
-                    setStringPrefValue(server.hostName, OscPrefKey.HOME_HOSTNAME, prefs)
-                    setStringPrefValue("vpn", OscPrefKey.HOME_USERNAME, prefs)
-                    setStringPrefValue("vpn", OscPrefKey.HOME_PASSWORD, prefs)
-                    findNavController().navigateUp()
-                }
-                view?.findViewById<RecyclerView>(R.id.servers_recycler_view)?.adapter = serverListAdapter
+                serverListAdapter.updateData(servers)
                 swipeRefreshLayout.isRefreshing = false
             }
         }

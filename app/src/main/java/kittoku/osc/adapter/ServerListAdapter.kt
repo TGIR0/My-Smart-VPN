@@ -1,5 +1,6 @@
 package kittoku.osc.adapter
 
+import android.annotation.SuppressLint
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -12,7 +13,7 @@ import kittoku.osc.repository.SstpServer
 import java.util.Locale
 
 class ServerListAdapter(
-    private val servers: List<SstpServer>,
+    private var servers: MutableList<SstpServer>,
     private val onServerClick: (SstpServer) -> Unit
 ) : RecyclerView.Adapter<ServerListAdapter.ViewHolder>() {
 
@@ -27,6 +28,13 @@ class ServerListAdapter(
     }
 
     override fun getItemCount() = servers.size
+
+    @SuppressLint("NotifyDataSetChanged")
+    fun updateData(newServers: List<SstpServer>) {
+        servers.clear()
+        servers.addAll(newServers)
+        notifyDataSetChanged()
+    }
 
     inner class ViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
         private val tvPing: TextView = itemView.findViewById(R.id.tv_ping)
@@ -48,4 +56,3 @@ class ServerListAdapter(
         }
     }
 }
-
