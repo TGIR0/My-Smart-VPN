@@ -8,7 +8,11 @@
     <fragment
         android:id="@+id/HomeFragment"
         android:name="kittoku.osc.fragment.HomeFragment"
-        android:label="fragment_home" />
+        android:label="fragment_home" >
+        <action
+            android:id="@+id/action_HomeFragment_to_ServerListFragment"
+            app:destination="@id/ServerListFragment" />
+    </fragment>
 
     <fragment
         android:id="@+id/ServerListFragment"
