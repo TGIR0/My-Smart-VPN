@@ -14,6 +14,7 @@ import kittoku.osc.R
 import kittoku.osc.adapter.ServerListAdapter
 import kittoku.osc.preference.OscPrefKey
 import kittoku.osc.preference.accessor.setStringPrefValue
+import kittoku.osc.repository.SstpServer
 import kittoku.osc.repository.VpnRepository
 import kittoku.osc.service.ACTION_VPN_CONNECT
 import kittoku.osc.service.SstpVpnService
