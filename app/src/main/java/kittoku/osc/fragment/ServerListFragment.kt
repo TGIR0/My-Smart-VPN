@@ -25,7 +25,6 @@ class ServerListFragment : Fragment(R.layout.fragment_server_list) {
         serversRecyclerView.layoutManager = LinearLayoutManager(context)
 
         serverListAdapter = ServerListAdapter(mutableListOf()) { server ->
-            // Set the result to be received by the HomeFragment
             setFragmentResult("serverSelection", bundleOf("selectedHostname" to server.hostName))
             findNavController().navigateUp()
         }

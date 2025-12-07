@@ -1,9 +1,9 @@
-
 package kittoku.osc.repository
 
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.IOException
+
 
 data class SstpServer(
     val hostName: String,
@@ -43,18 +43,21 @@ class VpnRepository {
         val servers = mutableListOf<SstpServer>()
         val lines = data.split('\n').filter { it.isNotBlank() }
 
-        // Skip header line
+        // Skip header line which starts with #
         for (line in lines.drop(1)) {
             if (line.startsWith("#") || line.startsWith("*")) continue
 
             try {
                 val p = line.split(",")
-                if (p.size < 13) continue // Ensure we have enough columns
+                if (p.size < 8) continue // Basic check for enough columns
 
-                val isSstp = p[12].trim() == "1"
                 val countryCode = p[6].trim()
 
-                if (isSstp && countryCode.equals("IR", ignoreCase = true).not()) {
+                // CRITICAL FIX: The SSTP port is in column 12, not a simple 0/1 flag.
+                // We will check if the SSTP port is available and not 0.
+                val sstpPort = p.getOrNull(12)?.trim()?.toIntOrNull() ?: 0
+
+                if (sstpPort > 0 && countryCode.equals("IR", ignoreCase = true).not()) {
                     var hostName = p[0].trim()
                     if (!hostName.endsWith(".opengw.net")) {
                         hostName += ".opengw.net"
@@ -72,12 +75,11 @@ class VpnRepository {
                     servers.add(server)
                 }
             } catch (e: Exception) {
-                // Ignore malformed lines and continue parsing
+                // Ignore malformed lines and continue parsing other valid lines
                 println("Skipping malformed line: $line")
             }
         }
-        
+
         return servers.sortedByDescending { it.sessions }
     }
 }
-
