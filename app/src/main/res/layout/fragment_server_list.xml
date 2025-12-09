@@ -13,12 +13,14 @@
             android:id="@+id/txtStatus"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:padding="8dp"
+            android:padding="12dp"
             android:text="Idle"
             android:gravity="center"
-            android:background="#E0E0E0"
-            android:textColor="#757575"
-            android:textStyle="bold" />
+            android:background="#E9ECEF"
+            android:textColor="#6C757D"
+            android:textStyle="bold"
+            android:textSize="16sp" />
+
 
         <androidx.recyclerview.widget.RecyclerView
             android:id="@+id/servers_recycler_view"
