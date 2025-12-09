@@ -61,7 +61,7 @@ class ServerListFragment : Fragment(R.layout.fragment_server_list) {
             }
         }
     }
-    }
+
 
     override fun onResume() {
         super.onResume()
