@@ -4,7 +4,6 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.IOException
 
-
 data class SstpServer(
     val hostName: String,
     val ip: String,
@@ -43,43 +42,68 @@ class VpnRepository {
         val servers = mutableListOf<SstpServer>()
         val lines = data.split('\n').filter { it.isNotBlank() }
 
-        // Skip header line which starts with #
-        for (line in lines.drop(1)) {
-            if (line.startsWith("#") || line.startsWith("*")) continue
+        // Skip header line which starts with # or * usually, but strictly speaking we drop the first one if it's header-like
+        // The prompt implies robust parsing. CSV usually has a header. The previous code dropped 1.
+        // We will inspect lines.
+        for (line in lines) {
+            if (line.startsWith("#") || line.startsWith("Hostname") || line.contains("Quality")) continue
 
             try {
                 val p = line.split(",")
-                if (p.size < 8) continue // Basic check for enough columns
+                // We need at least up to index 12 (SSTP)
+                if (p.size <= 12) continue
 
+                // 4. Filters:
+                // Exclude CountryCode (Index 6) if it equals "IR"
                 val countryCode = p[6].trim()
+                if (countryCode.equals("IR", ignoreCase = true)) continue
 
-                // CRITICAL FIX: The SSTP port is in column 12, not a simple 0/1 flag.
-                // We will check if the SSTP port is available and not 0.
-                val sstpPort = p.getOrNull(12)?.trim()?.toIntOrNull() ?: 0
+                // Include ONLY if SSTP (Index 12) equals "1"
+                val sstpSupport = p[12].trim()
+                if (sstpSupport != "1") continue
 
-                if (sstpPort > 0 && countryCode.equals("IR", ignoreCase = true).not()) {
-                    var hostName = p[0].trim()
-                    if (!hostName.endsWith(".opengw.net")) {
-                        hostName += ".opengw.net"
-                    }
-
-                    val server = SstpServer(
-                        hostName = hostName,
-                        ip = p[1].trim(),
-                        ping = p[3].trim().toIntOrNull() ?: 0,
-                        speed = p[4].trim().toLongOrNull() ?: 0L,
-                        country = p[5].trim(),
-                        countryCode = countryCode,
-                        sessions = p[7].trim().toLongOrNull() ?: 0L
-                    )
-                    servers.add(server)
+                // 2. Hostname Fix (CRITICAL)
+                // Parse Index 0. Check if it ends with .opengw.net. If NOT, append it.
+                var hostName = p[0].trim()
+                if (!hostName.endsWith(".opengw.net")) {
+                    hostName += ".opengw.net"
                 }
+
+                // 3. Data Types: Parse Speed (Index 4) and Sessions (Index 7) as Long
+                // Handling empty/null strings safely
+                
+                // Index 1: IP
+                val ip = p[1].trim()
+                
+                // Index 3: Ping
+                val ping = p[3].trim().toIntOrNull() ?: 0
+                
+                // Index 4: Speed
+                val speed = p[4].trim().toLongOrNull() ?: 0L
+                
+                // Index 5: Country Name
+                val country = p[5].trim()
+                
+                // Index 7: Sessions
+                val sessions = p[7].trim().toLongOrNull() ?: 0L
+
+                val server = SstpServer(
+                    hostName = hostName,
+                    ip = ip,
+                    country = country,
+                    countryCode = countryCode,
+                    speed = speed,
+                    sessions = sessions,
+                    ping = ping
+                )
+                servers.add(server)
+
             } catch (e: Exception) {
-                // Ignore malformed lines and continue parsing other valid lines
-                println("Skipping malformed line: $line")
+                // Ignore malformed lines
             }
         }
 
-        return servers.sortedByDescending { it.sessions }
+        // 5. Sorting: Sort by Sessions (Descending) + Speed (Descending)
+        return servers.sortedWith(compareByDescending<SstpServer> { it.sessions }.thenByDescending { it.speed })
     }
 }
