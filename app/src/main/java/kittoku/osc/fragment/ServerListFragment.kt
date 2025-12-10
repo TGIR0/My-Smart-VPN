@@ -8,14 +8,20 @@ import android.content.SharedPreferences
 import android.graphics.Color
 import android.os.Bundle
 import android.util.Log
+import android.view.Menu
+import android.view.MenuInflater
+import android.view.MenuItem
 import android.view.View
 import android.widget.AdapterView
 import android.widget.ArrayAdapter
 import android.widget.Spinner
 import android.widget.TextView
 import androidx.core.os.bundleOf
+import androidx.core.view.MenuHost
+import androidx.core.view.MenuProvider
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.setFragmentResult
+import androidx.lifecycle.Lifecycle
 import androidx.localbroadcastmanager.content.LocalBroadcastManager
 import androidx.navigation.fragment.findNavController
 import androidx.preference.PreferenceManager
@@ -35,6 +41,10 @@ import kittoku.osc.service.ACTION_VPN_STATUS_CHANGED
 class ServerListFragment : Fragment(R.layout.fragment_server_list) {
     companion object {
         private const val TAG = "ServerListFragment"
+        
+        // Static flag to track if we've pinged this session (survives view recreation)
+        private var hasPingedThisSession = false
+        private var lastPingedServers = mutableListOf<SstpServer>()
     }
     
     private lateinit var serverListAdapter: ServerListAdapter
@@ -50,8 +60,11 @@ class ServerListFragment : Fragment(R.layout.fragment_server_list) {
     // Track current connection status
     private var currentStatus = "DISCONNECTED"
     
-    // Flag to track if this is a manual refresh
+    // Flag to track if this is a manual refresh (triggers new ping)
     private var isManualRefresh = false
+    
+    // Flag to track if this is a fresh CSV import (triggers new ping)
+    private var isFreshImport = false
 
     private val vpnStatusReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -104,7 +117,7 @@ class ServerListFragment : Fragment(R.layout.fragment_server_list) {
         swipeRefreshLayout.setOnRefreshListener { 
             Log.d(TAG, "Manual refresh triggered")
             isManualRefresh = true
-            loadServers() 
+            loadServersWithPing()  // Manual refresh always pings
         }
 
         // Set initial status
@@ -112,41 +125,81 @@ class ServerListFragment : Fragment(R.layout.fragment_server_list) {
         currentStatus = if (isCurrentlyConnected) "CONNECTED" else "DISCONNECTED"
         updateStatusUI(currentStatus)
         
-        // Load servers (will use cache if available)
-        isManualRefresh = false
-        loadServers()
+        // ISSUE #5 FIX: Only load servers, don't auto-ping on initial view
+        // Show cached/previous pings if available
+        loadServersWithoutPing()
     }
 
-    private fun loadServers() {
-        Log.d(TAG, "Loading servers... (manual refresh: $isManualRefresh)")
+    /**
+     * ISSUE #5 FIX: Load servers WITHOUT triggering new ping measurement
+     * Shows previous ping results if available
+     */
+    private fun loadServersWithoutPing() {
+        Log.d(TAG, "Loading servers WITHOUT pinging (hasPingedThisSession: $hasPingedThisSession)")
+        swipeRefreshLayout.isRefreshing = true
+        
+        // If we have pinged servers from this session, show those
+        if (hasPingedThisSession && lastPingedServers.isNotEmpty()) {
+            Log.d(TAG, "Using session-cached pinged servers (${lastPingedServers.size})")
+            allServers.clear()
+            allServers.addAll(lastPingedServers)
+            moveConnectedServerToTop()
+            serverListAdapter.updateData(allServers)
+            swipeRefreshLayout.isRefreshing = false
+            setupCountryFilter()
+            updateConnectedServerHighlight()
+            txtStatus.text = "✓ ${allServers.size} servers (cached pings)"
+            return
+        }
+        
+        // Load from cache without pinging
+        val cachedServers = ServerCache.loadCachedServers(prefs)
+        if (cachedServers != null && cachedServers.isNotEmpty()) {
+            allServers.clear()
+            allServers.addAll(cachedServers)
+            moveConnectedServerToTop()
+            serverListAdapter.updateData(allServers)
+            swipeRefreshLayout.isRefreshing = false
+            setupCountryFilter()
+            updateConnectedServerHighlight()
+            txtStatus.text = "Pull to refresh & measure pings"
+        } else {
+            // No cache - must fetch and ping
+            isFreshImport = true
+            loadServersWithPing()
+        }
+    }
+
+    /**
+     * Load servers AND trigger ping measurement
+     * Called on: manual pull-to-refresh OR fresh CSV import
+     */
+    private fun loadServersWithPing() {
+        Log.d(TAG, "Loading servers WITH pinging (manual: $isManualRefresh, fresh: $isFreshImport)")
         swipeRefreshLayout.isRefreshing = true
         
         val isConnected = getBooleanPrefValue(OscPrefKey.ROOT_STATE, prefs)
         
-        // Check if we should use cache or fetch remote
-        if (ServerCache.shouldFetchRemote(prefs, isManualRefresh, isConnected)) {
+        // Check if we should fetch from remote
+        if (ServerCache.shouldFetchRemote(prefs, isManualRefresh, isConnected) || isFreshImport) {
             Log.d(TAG, "Fetching from remote server")
             txtStatus.text = "Fetching server list..."
+            isFreshImport = true  // Mark as fresh import to trigger ping
             
             vpnRepository.fetchSstpServers { servers ->
                 activity?.runOnUiThread {
                     if (servers.isNotEmpty()) {
-                        // Save to cache
                         ServerCache.saveServers(prefs, servers)
                     }
                     processServersAndMeasurePing(servers)
                 }
             }
         } else {
-            // Load from cache
-            Log.d(TAG, "Loading from cache")
-            txtStatus.text = "Loading cached servers..."
-            
+            // Load from cache and ping
             val cachedServers = ServerCache.loadCachedServers(prefs)
             if (cachedServers != null && cachedServers.isNotEmpty()) {
                 processServersAndMeasurePing(cachedServers)
             } else {
-                // Fallback to remote fetch if cache is somehow empty
                 vpnRepository.fetchSstpServers { servers ->
                     activity?.runOnUiThread {
                         if (servers.isNotEmpty()) {
@@ -159,6 +212,7 @@ class ServerListFragment : Fragment(R.layout.fragment_server_list) {
         }
         
         isManualRefresh = false
+        isFreshImport = false
     }
     
     /**
@@ -213,15 +267,15 @@ class ServerListFragment : Fragment(R.layout.fragment_server_list) {
                 // Move connected server to top after sorting
                 moveConnectedServerToTop()
                 
+                // ISSUE #5 FIX: Save to session cache so pings survive view recreation
+                lastPingedServers.clear()
+                lastPingedServers.addAll(allServers)
+                hasPingedThisSession = true
+                
                 serverListAdapter.updateData(allServers)
                 updateConnectedServerHighlight()
                 
-                val cacheAge = ServerCache.getCacheAgeMinutes(prefs)
-                txtStatus.text = if (cacheAge > 0) {
-                    "Sorted by ping (cache: ${cacheAge}m ago)"
-                } else {
-                    "✓ Sorted by lowest ping"
-                }
+                txtStatus.text = "✓ Sorted by lowest ping (${allServers.size} servers)"
             }
         )
     }

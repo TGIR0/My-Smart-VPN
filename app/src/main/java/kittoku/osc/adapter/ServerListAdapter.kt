@@ -7,7 +7,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.ImageView
 import android.widget.TextView
-import androidx.cardview.widget.CardView
+import com.google.android.material.card.MaterialCardView
 import androidx.recyclerview.widget.RecyclerView
 import com.squareup.picasso.Picasso
 import kittoku.osc.R
@@ -96,49 +96,49 @@ class ServerListAdapter(
         private val tvHostname: TextView = itemView.findViewById(R.id.tv_hostname)
         private val tvDetails: TextView = itemView.findViewById(R.id.tv_details)
         private val tvScoreSpeed: TextView = itemView.findViewById(R.id.tv_score_speed)
-        private val cardView: CardView? = itemView.findViewById(R.id.card_server)
+        private val cardView: MaterialCardView? = itemView.findViewById(R.id.card_server)
 
         fun bind(server: SstpServer, isConnected: Boolean) {
-            tvHostname.text = server.hostName
-            tvDetails.text = "${server.countryCode} - ${server.country}"
+            // Country name is now the main title (more user-friendly)
+            tvDetails.text = server.country
             
-            // Show score for smart failover info
+            // Hostname is secondary info
+            tvHostname.text = server.hostName
+            
+            // Simplified speed display (no score - users don't care about internal scores)
             tvScoreSpeed.text = String.format(
                 Locale.getDefault(), 
-                "Score: %,d | %.2f Mbps", 
-                server.score, 
+                "%.1f Mbps", 
                 server.speed / 1_000_000.0
             )
 
+            // Load country flag
             val flagUrl = "https://www.vpn-gate.net/images/flags/${server.countryCode}.png"
-            Picasso.get().load(flagUrl).into(ivFlag)
+            Picasso.get().load(flagUrl).placeholder(android.R.drawable.ic_menu_gallery).into(ivFlag)
             
             // Highlight connected server
             if (isConnected) {
                 cardView?.setCardBackgroundColor(Color.parseColor("#1B3D1B")) // Dark green
-                tvHostname.setTextColor(Color.parseColor("#4CAF50")) // Green
-                tvPing.text = "● Connected"
+                tvDetails.setTextColor(Color.parseColor("#4CAF50")) // Green title
+                tvPing.text = "●"
                 tvPing.setTextColor(Color.parseColor("#4CAF50"))
             } else {
                 cardView?.setCardBackgroundColor(Color.parseColor("#2D2D44")) // Default dark
-                tvHostname.setTextColor(Color.WHITE)
+                tvDetails.setTextColor(Color.WHITE)
                 
-                // ISSUE #6 FIX: Display real-time measured ping, NOT CSV ping
+                // Display real-time measured ping with clear status
                 when {
                     server.realPing == -1L -> {
-                        // Not measured yet or timed out
-                        tvPing.text = "Timeout"
-                        tvPing.setTextColor(Color.parseColor("#F44336")) // Red
+                        tvPing.text = "—"
+                        tvPing.setTextColor(Color.parseColor("#666666"))
                     }
                     server.realPing == 0L -> {
-                        // Still pending
                         tvPing.text = "..."
                         tvPing.setTextColor(Color.parseColor("#888888"))
                     }
                     else -> {
-                        // Has real ping measurement
-                        tvPing.text = "${server.realPing} ms"
-                        // Color code by latency
+                        tvPing.text = "${server.realPing}"
+                        // Color code by latency for quick visual scanning
                         val color = when {
                             server.realPing < 100 -> "#4CAF50"  // Green - Excellent
                             server.realPing < 200 -> "#8BC34A"  // Light Green - Good

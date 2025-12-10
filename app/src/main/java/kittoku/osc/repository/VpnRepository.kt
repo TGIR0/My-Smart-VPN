@@ -86,6 +86,14 @@ class VpnRepository {
         Log.d(TAG, "Loaded ${successfulServers.size} successful servers, last: $lastSuccessfulServer")
     }
     
+    /**
+     * Get last successfully connected server hostname
+     * Used for "Last Connected Server Priority" logic
+     */
+    fun getLastSuccessfulServer(): String? {
+        return lastSuccessfulServer
+    }
+    
     fun markServerSuccess(prefs: SharedPreferences, hostname: String) {
         successfulServers.add(hostname)
         lastSuccessfulServer = hostname

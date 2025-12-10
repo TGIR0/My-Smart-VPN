@@ -40,7 +40,7 @@ internal abstract class LinkPreference(context: Context, attrs: AttributeSet) : 
 }
 
 internal class LinkOscPreference(context: Context, attrs: AttributeSet) : LinkPreference(context, attrs) {
-    override val preferenceTitle = "Move to this app's project page"
-    override val preferenceSummary = "github.com/kittoku/Open-SSTP-Client"
-    override val url = "https://github.com/kittoku/Open-SSTP-Client"
+    override val preferenceTitle = "My Smart VPN - Project Page"
+    override val preferenceSummary = "github.com/mahdigholamipak/My-Smart-VPN"
+    override val url = "https://github.com/mahdigholamipak/My-Smart-VPN"
 }

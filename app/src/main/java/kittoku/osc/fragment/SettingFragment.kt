@@ -4,7 +4,11 @@ import android.app.Activity
 import android.content.Intent
 import android.content.SharedPreferences
 import android.os.Bundle
+import android.view.View
 import androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.updatePadding
 import androidx.navigation.fragment.findNavController
 import androidx.preference.Preference
 import androidx.preference.PreferenceFragmentCompat
@@ -62,6 +66,24 @@ internal class SettingFragment : PreferenceFragmentCompat() {
         setIranBypassListener()
         addViewLogsOption()
         setupAboutListener()  // Issue #7 Fix: Add About page entry point
+    }
+    
+    /**
+     * ISSUE #1 FIX: Apply window insets padding so "About" section is visible
+     * above the system navigation bar
+     */
+    override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
+        super.onViewCreated(view, savedInstanceState)
+        
+        // Find the RecyclerView inside PreferenceFragmentCompat and apply padding
+        listView?.let { recyclerView ->
+            ViewCompat.setOnApplyWindowInsetsListener(recyclerView) { v, insets ->
+                val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+                v.updatePadding(bottom = systemBars.bottom)
+                insets
+            }
+            recyclerView.clipToPadding = false
+        }
     }
     
     /**

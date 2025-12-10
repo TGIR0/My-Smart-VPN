@@ -272,8 +272,52 @@ class HomeFragment : Fragment(R.layout.fragment_home) {
         }
     }
 
+    /**
+     * ISSUE #3 FIX: Refactored connection logic with priority
+     * Step 1: Try last successfully connected server immediately
+     * Step 2: Use cached server list if available
+     * Step 3: Only fetch from GitHub if cache is empty/expired
+     */
     private fun loadServersAndConnect() {
-        updateStatusUI("Loading servers...")
+        // STEP 1: Check for last successful server - try it first!
+        val lastSuccessful = vpnRepository.getLastSuccessfulServer()
+        if (lastSuccessful != null) {
+            Log.d(TAG, "Trying last successful server first: $lastSuccessful")
+            updateStatusUI("Connecting to last server...")
+            
+            setStringPrefValue(lastSuccessful, OscPrefKey.HOME_HOSTNAME, prefs)
+            setStringPrefValue("vpn", OscPrefKey.HOME_USERNAME, prefs)
+            setStringPrefValue("vpn", OscPrefKey.HOME_PASSWORD, prefs)
+            
+            isFailoverActive = true
+            isUserInitiatedDisconnect = false
+            attemptedServers.add(lastSuccessful)
+            
+            startConnectionWithFailover()
+            return
+        }
+        
+        // STEP 2: Check for cached server list
+        val cachedServers = kittoku.osc.repository.ServerCache.loadCachedServers(prefs)
+        val isCacheValid = kittoku.osc.repository.ServerCache.isCacheValid(prefs)
+        
+        if (cachedServers != null && cachedServers.isNotEmpty() && isCacheValid) {
+            Log.d(TAG, "Using cached server list (${cachedServers.size} servers)")
+            updateStatusUI("Connecting...")
+            
+            servers.clear()
+            servers.addAll(cachedServers.sortedByDescending { it.smartRank })
+            currentServerIndex = 0
+            attemptedServers.clear()
+            isFailoverActive = true
+            isUserInitiatedDisconnect = false
+            startConnectionFlow()
+            return
+        }
+        
+        // STEP 3: Fetch fresh list from GitHub only if no cache
+        Log.d(TAG, "Cache empty or expired - fetching from server")
+        updateStatusUI("Fetching server list...")
         
         vpnRepository.fetchSstpServers { newServers ->
             activity?.runOnUiThread {
@@ -282,14 +326,61 @@ class HomeFragment : Fragment(R.layout.fragment_home) {
                     return@runOnUiThread
                 }
                 
+                // Save to cache
+                kittoku.osc.repository.ServerCache.saveServers(prefs, newServers)
+                
                 servers.clear()
-                // Sort by score (higher is better) - score is at index 2 in CSV
-                servers.addAll(newServers.sortedByDescending { it.sessions }) // Use score when available
+                servers.addAll(newServers.sortedByDescending { it.smartRank })
                 currentServerIndex = 0
                 attemptedServers.clear()
                 isFailoverActive = true
                 isUserInitiatedDisconnect = false
                 startConnectionFlow()
+            }
+        }
+    }
+    
+    /**
+     * Start connection with failover capability for last successful server
+     */
+    private fun startConnectionWithFailover() {
+        connectionAttemptRunnable = Runnable {
+            Log.d(TAG, "Last server connection timeout, loading server list")
+            if (currentState != ConnectionState.CONNECTED) {
+                loadServerListAndConnect()
+            }
+        }
+        connectionHandler.postDelayed(connectionAttemptRunnable!!, CONNECTION_TIMEOUT_MS)
+        
+        VpnService.prepare(requireContext())?.also {
+            preparationLauncher.launch(it)
+        } ?: startVpnService(ACTION_VPN_CONNECT)
+    }
+    
+    /**
+     * Load server list and connect (fallback path)
+     */
+    private fun loadServerListAndConnect() {
+        val cachedServers = kittoku.osc.repository.ServerCache.loadCachedServers(prefs)
+        
+        if (cachedServers != null && cachedServers.isNotEmpty()) {
+            servers.clear()
+            servers.addAll(cachedServers.sortedByDescending { it.smartRank })
+            currentServerIndex = 0
+            isFailoverActive = true
+            startConnectionFlow()
+        } else {
+            vpnRepository.fetchSstpServers { newServers ->
+                activity?.runOnUiThread {
+                    if (newServers.isNotEmpty()) {
+                        kittoku.osc.repository.ServerCache.saveServers(prefs, newServers)
+                        servers.clear()
+                        servers.addAll(newServers.sortedByDescending { it.smartRank })
+                        currentServerIndex = 0
+                        isFailoverActive = true
+                        startConnectionFlow()
+                    }
+                }
             }
         }
     }
