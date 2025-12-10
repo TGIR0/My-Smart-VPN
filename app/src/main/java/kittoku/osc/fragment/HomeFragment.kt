@@ -282,6 +282,9 @@ class HomeFragment : Fragment(R.layout.fragment_home) {
     /**
      * REQUIREMENT #2: Background ping refresh on app launch
      * Refreshes ping latencies to replace old cached values
+    /**
+     * REQUIREMENT #2: Background ping refresh on app launch
+     * REQUIREMENT #1: Broadcasts updates for real-time UI sync
      */
     private fun refreshPingsInBackground() {
         val cachedServers = kittoku.osc.repository.ServerCache.loadCachedServers(prefs)
@@ -292,17 +295,40 @@ class HomeFragment : Fragment(R.layout.fragment_home) {
         
         Log.d(TAG, "Background ping refresh: ${cachedServers.size} servers")
         
-        // Refresh pings in background (silent, no UI updates)
+        // Refresh pings in background with LIVE UI updates
         vpnRepository.measureRealPingsParallel(
             cachedServers,
-            onServerUpdated = { _, _ -> },
-            onProgress = { _, _ -> },
+            onServerUpdated = { _, updatedServer ->
+                // REQUIREMENT #1: Broadcast each server update for real-time UI
+                try {
+                    context?.let { ctx ->
+                        kittoku.osc.repository.PingUpdateManager.notifyServerPingUpdate(ctx, updatedServer)
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to broadcast ping update: ${e.message}")
+                }
+            },
+            onProgress = { current, total ->
+                // Broadcast progress for UI
+                try {
+                    context?.let { ctx ->
+                        kittoku.osc.repository.PingUpdateManager.notifyProgress(ctx, current, total)
+                    }
+                } catch (e: Exception) { /* ignore */ }
+            },
             onComplete = { sortedServers ->
                 // Filter out dead servers and save
                 val liveServers = sortedServers.filter { it.realPing > 0 }
                 if (liveServers.isNotEmpty()) {
                     kittoku.osc.repository.ServerCache.saveFilteredServersWithPings(prefs, liveServers)
                     Log.d(TAG, "Background ping complete: ${liveServers.size} live servers cached")
+                    
+                    // REQUIREMENT #1: Broadcast completion for final UI sort
+                    try {
+                        context?.let { ctx ->
+                            kittoku.osc.repository.PingUpdateManager.notifyPingComplete(ctx, liveServers)
+                        }
+                    } catch (e: Exception) { /* ignore */ }
                 }
             }
         )

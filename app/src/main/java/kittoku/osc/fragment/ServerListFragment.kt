@@ -92,6 +92,62 @@ class ServerListFragment : Fragment(R.layout.fragment_server_list) {
             }
         }
     }
+    
+    /**
+     * REQUIREMENT #1: Real-time UI reactivity receiver
+     * Receives ping updates from HomeFragment background refresh
+     * Updates individual server items and re-sorts list in real-time
+     */
+    private val pingUpdateReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            when (intent?.action) {
+                kittoku.osc.repository.PingUpdateManager.ACTION_PING_UPDATE -> {
+                    // Single server ping update - update that item in list
+                    val serverJson = intent.getStringExtra(kittoku.osc.repository.PingUpdateManager.EXTRA_SERVER_JSON)
+                    if (serverJson != null) {
+                        val updatedServer = kittoku.osc.repository.PingUpdateManager.parseServer(serverJson)
+                        if (updatedServer != null) {
+                            updateServerInList(updatedServer)
+                        }
+                    }
+                    
+                    // Progress update
+                    val progress = intent.getIntExtra(kittoku.osc.repository.PingUpdateManager.EXTRA_PROGRESS, -1)
+                    val total = intent.getIntExtra(kittoku.osc.repository.PingUpdateManager.EXTRA_TOTAL, -1)
+                    if (progress > 0 && total > 0) {
+                        txtStatus.text = "Refreshing: $progress/$total"
+                    }
+                }
+                
+                kittoku.osc.repository.PingUpdateManager.ACTION_PING_COMPLETE -> {
+                    // All pings complete - reload and re-sort list
+                    val serversJson = intent.getStringExtra(kittoku.osc.repository.PingUpdateManager.EXTRA_SERVER_JSON)
+                    if (serversJson != null) {
+                        val sortedServers = kittoku.osc.repository.PingUpdateManager.parseServerList(serversJson)
+                        if (sortedServers != null) {
+                            Log.d(TAG, "Ping complete broadcast: ${sortedServers.size} servers")
+                            allServers.clear()
+                            allServers.addAll(sortedServers.sortedBy { it.realPing })
+                            moveConnectedServerToTop()
+                            serverListAdapter.updateData(allServers)
+                            txtStatus.text = "✓ Updated (${allServers.size} servers)"
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    /**
+     * Update a single server in the list (for real-time ping updates)
+     */
+    private fun updateServerInList(updatedServer: SstpServer) {
+        val index = allServers.indexOfFirst { it.hostName == updatedServer.hostName }
+        if (index >= 0) {
+            allServers[index] = updatedServer
+            serverListAdapter.notifyItemChanged(index)
+        }
+    }
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
@@ -377,6 +433,16 @@ class ServerListFragment : Fragment(R.layout.fragment_server_list) {
             IntentFilter(ACTION_VPN_STATUS_CHANGED)
         )
         
+        // REQUIREMENT #1: Register ping update receiver for real-time UI updates
+        val pingFilter = IntentFilter().apply {
+            addAction(kittoku.osc.repository.PingUpdateManager.ACTION_PING_UPDATE)
+            addAction(kittoku.osc.repository.PingUpdateManager.ACTION_PING_COMPLETE)
+        }
+        LocalBroadcastManager.getInstance(requireContext()).registerReceiver(
+            pingUpdateReceiver,
+            pingFilter
+        )
+        
         prefs.registerOnSharedPreferenceChangeListener(prefsListener)
         
         // Refresh status and highlighting
@@ -394,6 +460,7 @@ class ServerListFragment : Fragment(R.layout.fragment_server_list) {
         Log.d(TAG, "onPause - unregistering receivers")
         
         LocalBroadcastManager.getInstance(requireContext()).unregisterReceiver(vpnStatusReceiver)
+        LocalBroadcastManager.getInstance(requireContext()).unregisterReceiver(pingUpdateReceiver)
         prefs.unregisterOnSharedPreferenceChangeListener(prefsListener)
     }
 
