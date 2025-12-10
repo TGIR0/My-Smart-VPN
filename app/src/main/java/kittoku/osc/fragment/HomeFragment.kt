@@ -281,9 +281,6 @@ class HomeFragment : Fragment(R.layout.fragment_home) {
     
     /**
      * REQUIREMENT #2: Background ping refresh on app launch
-     * Refreshes ping latencies to replace old cached values
-    /**
-     * REQUIREMENT #2: Background ping refresh on app launch
      * REQUIREMENT #1: Broadcasts updates for real-time UI sync
      */
     private fun refreshPingsInBackground() {
