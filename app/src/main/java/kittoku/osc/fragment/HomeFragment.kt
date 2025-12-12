@@ -42,8 +42,8 @@ import kittoku.osc.service.ACTION_VPN_STATUS_CHANGED
 import kittoku.osc.service.GeoIpService
 import kittoku.osc.service.SstpVpnService
 import kittoku.osc.preference.IranBypassHelper
-import kittoku.osc.repository.ConnectionStateManager
 import kittoku.osc.viewmodel.SharedConnectionViewModel
+import kittoku.osc.viewmodel.ServerViewModel
 
 class HomeFragment : Fragment(R.layout.fragment_home) {
     companion object {
@@ -52,8 +52,9 @@ class HomeFragment : Fragment(R.layout.fragment_home) {
         private const val MAX_FAILOVER_ATTEMPTS = 15  // Requirement #4: 15 retry attempts
     }
     
-    // Activity-scoped ViewModel - shared with ManualConnectFragment
+    // Activity-scoped ViewModels - shared with other fragments
     private val connectionViewModel: SharedConnectionViewModel by activityViewModels()
+    private val serverViewModel: ServerViewModel by activityViewModels()
 
     private lateinit var prefs: SharedPreferences
     private lateinit var tvStatus: TextView
@@ -474,22 +475,47 @@ class HomeFragment : Fragment(R.layout.fragment_home) {
                 return
             }
             
-            // PRIORITY 1: Try Top 3 Best Quality Score servers
+            // PRIORITY 1: Use Best Quality Score server from ViewModel
+            // This ensures the same sorting logic is used for list display AND connection
+            val bestServer = serverViewModel.getBestServer()
+            if (bestServer != null) {
+                Log.d(TAG, "Priority 1: Best scored server from ViewModel: ${bestServer.hostName}")
+                
+                // Get top 3 for failover
+                val topServers = serverViewModel.getTopServers(3)
+                Log.d(TAG, "Top 3 servers: ${topServers.map { "${it.hostName} (Score=${ServerSorter.calculateScore(it)/1_000_000})" }}")
+                
+                updateStatusUI("Connecting to best server...")
+                
+                // Update ViewModel immediately
+                connectionViewModel.setConnecting(bestServer.hostName, isManual = false)
+                
+                // Set up servers list for failover (all scored servers)
+                val allScored = serverViewModel.servers.value ?: emptyList()
+                servers.clear()
+                servers.addAll(allScored)
+                currentServerIndex = 0
+                attemptedServers.clear()
+                isFailoverActive = true
+                isUserInitiatedDisconnect = false
+                
+                // Connect to best server
+                connectToServer(bestServer.hostName)
+                return
+            }
+            
+            // FALLBACK: Check cache if ViewModel is empty
             val sortedServers = kittoku.osc.repository.ServerCache.loadSortedServersWithPings(prefs)
             if (sortedServers != null && sortedServers.isNotEmpty()) {
-                // Use ServerSorter: Score = Speed / (Sessions + 1), filter out timeouts
                 val scoredServers = ServerSorter.sortByScore(sortedServers)
                 val topServers = ServerSorter.getTopServers(scoredServers, 3)
                 
                 if (topServers.isNotEmpty()) {
-                    val bestServer = topServers.first()
-                    Log.d(TAG, "Priority 1: Best scored server: ${bestServer.hostName}")
-                    Log.d(TAG, "Top 3: ${topServers.map { "${it.hostName} (Score=${ServerSorter.calculateScore(it)/1_000_000})" }}")
+                    val cacheBestServer = topServers.first()
+                    Log.d(TAG, "Using cache best server: ${cacheBestServer.hostName}")
                     
                     updateStatusUI("Connecting to best server...")
-                    
-                    // Update ViewModel immediately
-                    connectionViewModel.setConnecting(bestServer.hostName, isManual = false)
+                    connectionViewModel.setConnecting(cacheBestServer.hostName, isManual = false)
                     
                     servers.clear()
                     servers.addAll(scoredServers)
@@ -498,8 +524,7 @@ class HomeFragment : Fragment(R.layout.fragment_home) {
                     isFailoverActive = true
                     isUserInitiatedDisconnect = false
                     
-                    // Connect to best server
-                    connectToServer(bestServer.hostName)
+                    connectToServer(cacheBestServer.hostName)
                     return
                 }
             }

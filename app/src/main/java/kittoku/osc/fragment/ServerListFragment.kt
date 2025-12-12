@@ -20,6 +20,7 @@ import androidx.core.os.bundleOf
 import androidx.core.view.MenuHost
 import androidx.core.view.MenuProvider
 import androidx.fragment.app.Fragment
+import androidx.fragment.app.activityViewModels
 import androidx.fragment.app.setFragmentResult
 import androidx.lifecycle.Lifecycle
 import androidx.localbroadcastmanager.content.LocalBroadcastManager
@@ -34,9 +35,11 @@ import kittoku.osc.preference.OscPrefKey
 import kittoku.osc.preference.accessor.getBooleanPrefValue
 import kittoku.osc.preference.accessor.getStringPrefValue
 import kittoku.osc.repository.ServerCache
+import kittoku.osc.repository.ServerSorter
 import kittoku.osc.repository.SstpServer
 import kittoku.osc.repository.VpnRepository
 import kittoku.osc.service.ACTION_VPN_STATUS_CHANGED
+import kittoku.osc.viewmodel.ServerViewModel
 
 class ServerListFragment : Fragment(R.layout.fragment_server_list) {
     companion object {
@@ -46,6 +49,9 @@ class ServerListFragment : Fragment(R.layout.fragment_server_list) {
         private var hasPingedThisSession = false
         private var lastPingedServers = mutableListOf<SstpServer>()
     }
+    
+    // Activity-scoped ViewModel for reactive server list updates
+    private val serverViewModel: ServerViewModel by activityViewModels()
     
     private lateinit var serverListAdapter: ServerListAdapter
     private lateinit var swipeRefreshLayout: SwipeRefreshLayout
@@ -165,10 +171,7 @@ class ServerListFragment : Fragment(R.layout.fragment_server_list) {
         serverListAdapter = ServerListAdapter(mutableListOf()) { server ->
             Log.d(TAG, "Server selected: ${server.hostName}")
             
-            // ISSUE #4 FIX: Check if currently connected for disconnect-then-connect
-            val isCurrentlyConnected = getBooleanPrefValue(OscPrefKey.ROOT_STATE, prefs)
-            
-            // Pass both hostname and shouldConnect flag to HomeFragment
+            // Pass hostname and shouldConnect flag to HomeFragment
             setFragmentResult("serverSelection", bundleOf(
                 "selectedHostname" to server.hostName,
                 "shouldConnect" to true  // Always initiate connection after selection
@@ -178,11 +181,15 @@ class ServerListFragment : Fragment(R.layout.fragment_server_list) {
         }
         serversRecyclerView.adapter = serverListAdapter
 
-        // Setup pull-to-refresh
+        // CRITICAL: Observe ServerViewModel for REACTIVE UI updates
+        // This ensures list updates immediately when data changes (no navigation required)
+        observeServerViewModel()
+
+        // Setup pull-to-refresh - now uses ViewModel
         swipeRefreshLayout.setOnRefreshListener { 
-            Log.d(TAG, "Manual refresh triggered")
+            Log.d(TAG, "Manual refresh triggered (force refresh)")
             isManualRefresh = true
-            loadServersWithPing()  // Manual refresh always pings
+            serverViewModel.forceRefresh()
         }
 
         // Set initial status
@@ -190,17 +197,52 @@ class ServerListFragment : Fragment(R.layout.fragment_server_list) {
         currentStatus = if (isCurrentlyConnected) "CONNECTED" else "DISCONNECTED"
         updateStatusUI(currentStatus)
         
-        // ISSUE #5 FIX: Only load servers, don't auto-ping on initial view
-        // Show cached/previous pings if available
+        // Load initial data from ViewModel (cached or fetch)
         loadServersWithoutPing()
+    }
+    
+    /**
+     * REACTIVE UI: Observe ServerViewModel LiveData
+     * When ViewModel emits new data, UI updates INSTANTLY
+     * User NEVER has to navigate out/back to see changes
+     */
+    private fun observeServerViewModel() {
+        // Observe server list - updates immediately when data changes
+        serverViewModel.servers.observe(viewLifecycleOwner) { servers ->
+            if (servers.isNotEmpty()) {
+                Log.d(TAG, "ViewModel emitted ${servers.size} servers - updating UI instantly")
+                allServers.clear()
+                allServers.addAll(servers)  // Already sorted by QoS in ViewModel
+                moveConnectedServerToTop()
+                serverListAdapter.updateData(allServers)
+                setupCountryFilter()
+                updateConnectedServerHighlight()
+                txtStatus.text = "✓ ${servers.size} servers (QoS sorted)"
+            }
+        }
+        
+        // Observe loading state
+        serverViewModel.isLoading.observe(viewLifecycleOwner) { isLoading ->
+            swipeRefreshLayout.isRefreshing = isLoading
+        }
+        
+        // Observe ping progress
+        serverViewModel.pingProgress.observe(viewLifecycleOwner) { (current, total) ->
+            txtStatus.text = "Pinging: $current / $total"
+        }
+        
+        // Observe errors
+        serverViewModel.error.observe(viewLifecycleOwner) { error ->
+            error?.let {
+                txtStatus.text = "Error: $it"
+                serverViewModel.clearError()
+            }
+        }
     }
 
     /**
-     * ISSUE #5 FIX: Load servers WITHOUT triggering new ping measurement
-     * Shows previous ping results if available
-     * 
-     * CROSS-COMPONENT SYNC: Prioritizes sorted cache (written by HomeFragment)
-     * to ensure data from background operations is immediately visible
+     * Load servers WITHOUT triggering new ping measurement
+     * Uses ServerSorter for consistent QoS-based ordering
      */
     private fun loadServersWithoutPing() {
         Log.d(TAG, "Loading servers WITHOUT pinging (hasPingedThisSession: $hasPingedThisSession)")
@@ -209,30 +251,33 @@ class ServerListFragment : Fragment(R.layout.fragment_server_list) {
         // PRIORITY 1: If we have pinged servers from this session, show those
         if (hasPingedThisSession && lastPingedServers.isNotEmpty()) {
             Log.d(TAG, "Using session-cached pinged servers (${lastPingedServers.size})")
+            // Apply QoS sorting
+            val sorted = ServerSorter.sortByScore(lastPingedServers)
             allServers.clear()
-            allServers.addAll(lastPingedServers)
+            allServers.addAll(sorted)
             moveConnectedServerToTop()
             serverListAdapter.updateData(allServers)
             swipeRefreshLayout.isRefreshing = false
             setupCountryFilter()
             updateConnectedServerHighlight()
-            txtStatus.text = "✓ ${allServers.size} servers (cached pings)"
+            txtStatus.text = "✓ ${allServers.size} servers (QoS sorted)"
             return
         }
         
-        // PRIORITY 2: Load SORTED cache with pings (written by HomeFragment background operations)
-        // This ensures cross-component sync - HomeFragment updates are immediately visible
+        // PRIORITY 2: Load SORTED cache and apply QoS sorting
         val sortedServers = ServerCache.loadSortedServersWithPings(prefs)
         if (sortedServers != null && sortedServers.isNotEmpty()) {
-            Log.d(TAG, "Using sorted cache from HomeFragment: ${sortedServers.size} servers")
+            Log.d(TAG, "Using cache: ${sortedServers.size} servers")
+            // Apply QoS sorting: Score = Speed / (Sessions + 1)
+            val qosSorted = ServerSorter.sortByScore(sortedServers)
             allServers.clear()
-            allServers.addAll(sortedServers.sortedBy { it.realPing })
+            allServers.addAll(qosSorted)
             moveConnectedServerToTop()
             serverListAdapter.updateData(allServers)
             swipeRefreshLayout.isRefreshing = false
             setupCountryFilter()
             updateConnectedServerHighlight()
-            txtStatus.text = "✓ ${allServers.size} servers (pre-sorted)"
+            txtStatus.text = "✓ ${allServers.size} servers (QoS sorted)"
             return
         }
         
