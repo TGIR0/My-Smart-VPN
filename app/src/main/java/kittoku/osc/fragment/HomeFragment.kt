@@ -475,56 +475,51 @@ class HomeFragment : Fragment(R.layout.fragment_home) {
                 return
             }
             
-            // PRIORITY 1: Use Best Quality Score server from ViewModel
-            // This ensures the same sorting logic is used for list display AND connection
-            val bestServer = serverViewModel.getBestServer()
-            if (bestServer != null) {
-                Log.d(TAG, "Priority 1: Best scored server from ViewModel: ${bestServer.hostName}")
-                
-                // Get top 3 for failover
-                val topServers = serverViewModel.getTopServers(3)
-                Log.d(TAG, "Top 3 servers: ${topServers.map { "${it.hostName} (Score=${ServerSorter.calculateScore(it)/1_000_000})" }}")
-                
-                updateStatusUI("Connecting to best server...")
-                
-                // Update ViewModel immediately
-                connectionViewModel.setConnecting(bestServer.hostName, isManual = false)
-                
-                // Set up servers list for failover (all scored servers)
-                val allScored = serverViewModel.servers.value ?: emptyList()
-                servers.clear()
-                servers.addAll(allScored)
-                currentServerIndex = 0
-                attemptedServers.clear()
-                isFailoverActive = true
-                isUserInitiatedDisconnect = false
-                
-                // Connect to best server
-                connectToServer(bestServer.hostName)
-                return
+            // ========================================
+            // JUST-IN-TIME SORTING (Task 1)
+            // Re-calculate & Re-sort RIGHT before selection
+            // Formula: QualityScore = 0.6*(Speed/(Sessions+1)) + 0.4*(PingScore)
+            // ========================================
+            
+            // Step 1: Load current data from cache or ViewModel
+            val cachedServers = kittoku.osc.repository.ServerCache.loadSortedServersWithPings(prefs)
+            val viewModelServers = serverViewModel.servers.value
+            
+            // Use whichever source has data
+            val dataSource = when {
+                !viewModelServers.isNullOrEmpty() -> viewModelServers
+                !cachedServers.isNullOrEmpty() -> cachedServers
+                else -> null
             }
             
-            // FALLBACK: Check cache if ViewModel is empty
-            val sortedServers = kittoku.osc.repository.ServerCache.loadSortedServersWithPings(prefs)
-            if (sortedServers != null && sortedServers.isNotEmpty()) {
-                val scoredServers = ServerSorter.sortByScore(sortedServers)
-                val topServers = ServerSorter.getTopServers(scoredServers, 3)
+            if (dataSource != null && dataSource.isNotEmpty()) {
+                // Step 2: FRESH SORT - Re-calculate Quality Scores RIGHT NOW
+                // This ensures we don't use a stale pre-sorted list
+                Log.d(TAG, "JUST-IN-TIME: Re-sorting ${dataSource.size} servers before connection")
+                val freshSorted = ServerSorter.sortByScore(dataSource)  // Fresh calculation
                 
-                if (topServers.isNotEmpty()) {
-                    val cacheBestServer = topServers.first()
-                    Log.d(TAG, "Using cache best server: ${cacheBestServer.hostName}")
+                if (freshSorted.isNotEmpty()) {
+                    // Step 3: Pick absolute best server (Index 0)
+                    val bestServer = freshSorted.first()
+                    val topServers = freshSorted.take(3)
+                    
+                    Log.d(TAG, "Best Server: ${bestServer.hostName}")
+                    Log.d(TAG, "Top 3: ${topServers.map { 
+                        "${it.hostName} (Score=${String.format("%.3f", ServerSorter.calculateScore(it)/1_000_000)})" 
+                    }}")
                     
                     updateStatusUI("Connecting to best server...")
-                    connectionViewModel.setConnecting(cacheBestServer.hostName, isManual = false)
+                    connectionViewModel.setConnecting(bestServer.hostName, isManual = false)
                     
+                    // Set up failover list (already sorted by quality)
                     servers.clear()
-                    servers.addAll(scoredServers)
+                    servers.addAll(freshSorted)
                     currentServerIndex = 0
                     attemptedServers.clear()
                     isFailoverActive = true
                     isUserInitiatedDisconnect = false
                     
-                    connectToServer(cacheBestServer.hostName)
+                    connectToServer(bestServer.hostName)
                     return
                 }
             }

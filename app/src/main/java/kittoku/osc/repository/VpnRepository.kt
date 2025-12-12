@@ -49,20 +49,17 @@ class VpnRepository {
         private const val SERVER_URL = "https://raw.githubusercontent.com/mahdigholamipak/vpn-list-mirror/refs/heads/main/server_list.csv"
         private const val OPENGW_SUFFIX = ".opengw.net"
         
-        // CRITICAL FIX: Strict 999ms timeout for quick reachability check
+        // Strict 999ms timeout for quick reachability check
         private const val LATENCY_CHECK_PORT = 443
         private const val LATENCY_TIMEOUT_MS = 999
         
         // Parallel ping configuration
-        private const val PARALLEL_PING_BATCH_SIZE = 20  // Ping 20 servers at a time
+        private const val PARALLEL_PING_BATCH_SIZE = 20
         
-        // Smart Scoring Weights - ISSUE #1 FIX: Revised algorithm
-        private const val WEIGHT_SPEED = 0.25
-        private const val WEIGHT_UPTIME = 0.35          // Higher weight for stable servers
-        private const val WEIGHT_PING = -0.15           // Lower ping = better
-        private const val WEIGHT_SESSIONS_OPTIMAL = 0.10 // Moderate sessions = good (not too busy, not dead)
-        private const val PUBLIC_VPN_PENALTY = -100.0    // Strong penalty for "public-vpn-*" servers
-        private const val SUCCESS_BONUS = 200.0          // Bonus for previously successful servers
+        // NOTE: QoS scoring moved to ServerSorter.kt
+        // Kept only for legacy parseCsv smartRank calculation
+        private const val PUBLIC_VPN_PENALTY = -100.0
+        private const val SUCCESS_BONUS = 200.0
         
         // Prefs keys
         private const val PREF_SUCCESS_SERVERS = "success_servers"
@@ -292,65 +289,8 @@ class VpnRepository {
         }
     }
 
-    /**
-     * ISSUE #1 FIX: Revised smart ranking algorithm
-     * 
-     * Key observations from user data:
-     * - public-vpn-* servers with high raw scores (2.9M) FAIL
-     * - Private servers with lower scores (1.1M) SUCCEED
-     * - High session counts alone don't indicate failure
-     * 
-     * New algorithm prioritizes:
-     * 1. Previously successful servers (massive bonus)
-     * 2. Non-public-vpn servers (public ones get penalty)
-     * 3. Good uptime (stability indicator)
-     * 4. Moderate session count (10-100 is optimal)
-     * 5. Lower ping
-     */
-    private fun calculateSmartRank(
-        speed: Long,
-        uptime: Long,
-        sessions: Long,
-        ping: Int,
-        hostname: String,
-        isPublicVpn: Boolean,
-        maxSpeed: Long,
-        maxUptime: Long,
-        maxPing: Int
-    ): Double {
-        // Normalize to 0-100 scale
-        val normalizedSpeed = if (maxSpeed > 0) (speed.toDouble() / maxSpeed) * 100 else 0.0
-        val normalizedUptime = if (maxUptime > 0) (uptime.toDouble() / maxUptime) * 100 else 0.0
-        val normalizedPing = if (maxPing > 0) (ping.toDouble() / maxPing) * 100 else 0.0
-        
-        // Session scoring: moderate is best (10-100 sessions)
-        val sessionScore = when {
-            sessions < 5 -> 20.0      // Too few = possibly dead/unreliable
-            sessions in 5..50 -> 100.0  // Sweet spot
-            sessions in 51..150 -> 70.0 // Moderate load
-            else -> 40.0              // High load
-        }
-        
-        // Calculate base rank
-        var rank = (normalizedSpeed * WEIGHT_SPEED) +
-                   (normalizedUptime * WEIGHT_UPTIME) +
-                   (normalizedPing * WEIGHT_PING) +
-                   (sessionScore * WEIGHT_SESSIONS_OPTIMAL)
-        
-        // ISSUE #1 FIX: Heavy penalty for public-vpn-* servers
-        if (isPublicVpn) {
-            rank += PUBLIC_VPN_PENALTY
-            Log.d(TAG, "Applied public-vpn penalty to $hostname")
-        }
-        
-        // Bonus for previously successful servers
-        if (successfulServers.contains(hostname)) {
-            rank += SUCCESS_BONUS
-            Log.d(TAG, "Applied success bonus to $hostname")
-        }
-        
-        return rank
-    }
+    // NOTE: QoS scoring moved to ServerSorter.kt
+    // parseCsv uses simple preliminary rank, real QoS applied after ping
 
     private fun parseCsv(data: String): List<SstpServer> {
         val rawServers = mutableListOf<RawServerData>()
@@ -375,17 +315,20 @@ class VpnRepository {
             }
         }
         
-        // Find max values for normalization
-        val maxSpeed = rawServers.maxOfOrNull { it.speed } ?: 1L
-        val maxUptime = rawServers.maxOfOrNull { it.uptime } ?: 1L
-        val maxPing = rawServers.maxOfOrNull { it.ping } ?: 1
-        
-        // Calculate smart ranks
+        // Create servers with simple preliminary rank (real QoS applied by ServerSorter after ping)
         val servers = rawServers.map { raw ->
-            val smartRank = calculateSmartRank(
-                raw.speed, raw.uptime, raw.sessions, raw.ping, raw.hostName, raw.isPublicVpn,
-                maxSpeed, maxUptime, maxPing
-            )
+            // Simple preliminary rank: speed / sessions, with bonuses
+            var simpleRank = raw.speed.toDouble() / (raw.sessions + 1).toDouble()
+            
+            // Penalty for public-vpn servers
+            if (raw.isPublicVpn) {
+                simpleRank += PUBLIC_VPN_PENALTY
+            }
+            
+            // Bonus for previously successful servers
+            if (successfulServers.contains(raw.hostName)) {
+                simpleRank += SUCCESS_BONUS
+            }
             
             SstpServer(
                 hostName = raw.hostName,
@@ -398,15 +341,14 @@ class VpnRepository {
                 score = raw.score,
                 uptime = raw.uptime,
                 totalTraffic = raw.totalTraffic,
-                smartRank = smartRank,
+                smartRank = simpleRank,
                 isPublicVpn = raw.isPublicVpn
             )
         }
         
-        // ISSUE #7 FIX: No filters removed - all servers included
-        Log.d(TAG, "Parsed ${servers.size} servers (no country filters)")
+        Log.d(TAG, "Parsed ${servers.size} servers")
         
-        // Sort: last successful first, then by smartRank (highest first)
+        // Sort by preliminary rank (will be re-sorted by ServerSorter after ping)
         return servers.sortedWith(
             compareByDescending<SstpServer> { it.hostName == lastSuccessfulServer }
                 .thenByDescending { it.smartRank }

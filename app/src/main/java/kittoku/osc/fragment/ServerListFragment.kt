@@ -241,17 +241,22 @@ class ServerListFragment : Fragment(R.layout.fragment_server_list) {
     }
 
     /**
-     * Load servers WITHOUT triggering new ping measurement
-     * Uses ServerSorter for consistent QoS-based ordering
+     * JUST-IN-TIME SORTING (Task 1)
+     * 
+     * Load servers WITHOUT network fetch, but WITH fresh QoS sorting.
+     * Called on fragment open/resume to ensure list reflects current best options.
+     * 
+     * Formula: QualityScore = 0.6 × NormSpeed + 0.4 × NormPing
+     * where NormSpeed = (Speed / (Sessions + 1)) normalized to 0-1
      */
     private fun loadServersWithoutPing() {
-        Log.d(TAG, "Loading servers WITHOUT pinging (hasPingedThisSession: $hasPingedThisSession)")
+        Log.d(TAG, "JUST-IN-TIME: Re-sorting on fragment open (hasPingedThisSession: $hasPingedThisSession)")
         swipeRefreshLayout.isRefreshing = true
         
         // PRIORITY 1: If we have pinged servers from this session, show those
         if (hasPingedThisSession && lastPingedServers.isNotEmpty()) {
             Log.d(TAG, "Using session-cached pinged servers (${lastPingedServers.size})")
-            // Apply QoS sorting
+            // FRESH SORT: Re-calculate Quality Scores even for session-cached data
             val sorted = ServerSorter.sortByScore(lastPingedServers)
             allServers.clear()
             allServers.addAll(sorted)
@@ -264,11 +269,11 @@ class ServerListFragment : Fragment(R.layout.fragment_server_list) {
             return
         }
         
-        // PRIORITY 2: Load SORTED cache and apply QoS sorting
+        // PRIORITY 2: Load cache and apply FRESH QoS sorting
         val sortedServers = ServerCache.loadSortedServersWithPings(prefs)
         if (sortedServers != null && sortedServers.isNotEmpty()) {
-            Log.d(TAG, "Using cache: ${sortedServers.size} servers")
-            // Apply QoS sorting: Score = Speed / (Sessions + 1)
+            Log.d(TAG, "JUST-IN-TIME: Re-sorting ${sortedServers.size} cached servers")
+            // FRESH SORT: Don't rely on pre-sorted cache, recalculate now
             val qosSorted = ServerSorter.sortByScore(sortedServers)
             allServers.clear()
             allServers.addAll(qosSorted)

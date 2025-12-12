@@ -3,25 +3,50 @@ package kittoku.osc.repository
 import android.util.Log
 
 /**
- * ServerSorter - Implements Quality Score Algorithm
+ * ===============================================
+ * QoS ALGORITHM DOCUMENTATION
+ * ===============================================
  * 
  * FORMULA:
+ * ---------
+ * QualityScore = (0.6 × NormalizedSpeed) + (0.4 × NormalizedPing)
+ * 
+ * WHERE:
+ * ------
  * 1. Effective Speed = Speed / (Sessions + 1)
- *    - The "+1" simulates user's own connection load
- *    - Prevents division by zero
+ *    - The "+1" simulates the user's own connection being added
+ *    - Prevents division by zero when sessions = 0
+ *    - Example: 100 Mbps with 49 sessions = 100/(49+1) = 2.0 Mbps effective per user
  * 
- * 2. Normalization (0.0 to 1.0):
- *    - Ping: Lower is better -> Inverted normalization
- *    - Effective Speed: Higher is better -> Direct normalization
+ * 2. NormalizedSpeed (0.0 to 1.0):
+ *    - Higher effective speed = Higher score
+ *    - Formula: (EffectiveSpeed - MinSpeed) / (MaxSpeed - MinSpeed)
  * 
- * 3. Final Score = (0.6 × NormSpeed) + (0.4 × NormPing)
+ * 3. NormalizedPing (0.0 to 1.0):
+ *    - Lower ping = Higher score (inverted normalization)
+ *    - Formula: 1.0 - ((Ping - MinPing) / (MaxPing - MinPing))
  * 
- * STRICT FILTER: Timeout servers (ping = -1) are EXCLUDED completely
+ * WEIGHTS:
+ * --------
+ * - Speed Weight: 60% (0.6) - More important for throughput
+ * - Ping Weight:  40% (0.4) - Important for responsiveness
+ * 
+ * STRICT FILTER:
+ * --------------
+ * - Servers with Ping = -1 (timeout) are EXCLUDED completely
+ * - They are never cached, displayed, or selected for connection
+ * 
+ * TRIGGER POINTS (Just-in-Time Sorting):
+ * --------------------------------------
+ * 1. On Connect Button Click → Fresh sort → Pick Index 0
+ * 2. On Server List Open     → Fresh sort → Display sorted list
+ * 
+ * ===============================================
  */
 object ServerSorter {
     private const val TAG = "ServerSorter"
     
-    // Weights for final score calculation
+    // WEIGHTS: Speed more important than ping for VPN throughput
     private const val WEIGHT_SPEED = 0.6
     private const val WEIGHT_PING = 0.4
     
