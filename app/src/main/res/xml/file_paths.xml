@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- Cache directory for APK updates -->
+    <cache-path
+        name="apk_updates"
+        path="/" />
+    
+    <!-- External cache for larger files if needed -->
+    <external-cache-path
+        name="external_apk_updates"
+        path="/" />
+</paths>

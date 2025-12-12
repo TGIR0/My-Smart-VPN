@@ -225,16 +225,65 @@ class VpnRepository {
             val elapsed = System.currentTimeMillis() - startTime
             Log.d(TAG, "Parallel ping complete in ${elapsed}ms for ${servers.size} servers")
             
-            // Build final sorted list
+            // Build final sorted list using QoS score (60% ping, 40% speed)
             val sortedServers = results.values.toList().sortedWith(
                 compareByDescending<SstpServer> { it.hostName == lastSuccessfulServer }
-                    .thenBy { if (it.realPing < 0) Long.MAX_VALUE else it.realPing }
+                    .thenByDescending { calculateQoSScore(it) }
             )
             
             withContext(Dispatchers.Main) {
                 onComplete(sortedServers)
             }
         }
+    }
+    
+    /**
+     * QoS Score Calculation
+     * Weighted formula: 60% Ping (lower is better) + 40% Speed (higher is better)
+     * 
+     * Normalization:
+     * - Ping: Inverted scale (0-1000ms → 1.0-0.0), timeout = 0 score
+     * - Speed: Logarithmic scale for better distribution across wide range
+     * 
+     * @return Score from 0-100, higher is better
+     */
+    fun calculateQoSScore(server: SstpServer): Double {
+        // Ping score (60% weight): Lower ping = higher score
+        val pingScore = when {
+            server.realPing < 0 -> 0.0  // Timeout = worst score
+            server.realPing == 0L -> 100.0  // Instant = best score
+            server.realPing >= 1000 -> 0.0  // 1 second+ = worst score
+            else -> {
+                // Linear scale: 0ms = 100, 1000ms = 0
+                100.0 * (1.0 - (server.realPing.toDouble() / 1000.0))
+            }
+        }
+        
+        // Speed score (40% weight): Higher speed = higher score
+        // Using logarithmic scale because speeds vary from 1Mbps to 1000Mbps+
+        val speedScore = when {
+            server.speed <= 0 -> 0.0
+            else -> {
+                // Log scale: 1Mbps = ~0, 100Mbps = ~50, 1Gbps = ~75, 10Gbps = 100
+                val speedMbps = server.speed / 1_000_000.0  // Convert to Mbps
+                kotlin.math.min(100.0, kotlin.math.log10(speedMbps + 1) * 33.33)
+            }
+        }
+        
+        // Combined QoS score
+        val qosScore = (pingScore * 0.6) + (speedScore * 0.4)
+        
+        Log.d(TAG, "QoS: ${server.hostName}: ping=${server.realPing}ms(${String.format("%.1f", pingScore)}), " +
+                "speed=${server.speed/1_000_000}Mbps(${String.format("%.1f", speedScore)}) = ${String.format("%.2f", qosScore)}")
+        
+        return qosScore
+    }
+    
+    /**
+     * Sort servers by QoS score (for use by other components)
+     */
+    fun sortByQoS(servers: List<SstpServer>): List<SstpServer> {
+        return servers.sortedByDescending { calculateQoSScore(it) }
     }
     
     /**

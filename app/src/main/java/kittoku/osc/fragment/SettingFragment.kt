@@ -21,6 +21,10 @@ import kittoku.osc.preference.IranBypassHelper
 import kittoku.osc.preference.OscPrefKey
 import kittoku.osc.preference.accessor.setURIPrefValue
 import kittoku.osc.preference.custom.DirectoryPreference
+import kittoku.osc.update.UpdateManager
+import android.app.AlertDialog
+import android.app.ProgressDialog
+import android.widget.Toast
 
 
 internal class SettingFragment : PreferenceFragmentCompat() {
@@ -66,6 +70,7 @@ internal class SettingFragment : PreferenceFragmentCompat() {
         setIranBypassListener()
         addViewLogsOption()
         setupAboutListener()  // Issue #7 Fix: Add About page entry point
+        setupUpdateCheckListener()  // In-app update system
     }
     
     /**
@@ -168,5 +173,85 @@ internal class SettingFragment : PreferenceFragmentCompat() {
                 true
             }
         }
+    }
+    
+    /**
+     * Setup the "Check for Updates" preference click listener
+     */
+    private fun setupUpdateCheckListener() {
+        findPreference<Preference>("CHECK_FOR_UPDATES")?.also { pref ->
+            pref.onPreferenceClickListener = Preference.OnPreferenceClickListener {
+                checkForUpdates()
+                true
+            }
+        }
+    }
+    
+    /**
+     * Check for updates from GitHub Releases
+     */
+    @Suppress("DEPRECATION")
+    private fun checkForUpdates() {
+        val progressDialog = ProgressDialog(requireContext()).apply {
+            setMessage("Checking for updates...")
+            setCancelable(false)
+            show()
+        }
+        
+        UpdateManager.checkForUpdates(requireContext()) { result ->
+            progressDialog.dismiss()
+            
+            if (result.error != null) {
+                Toast.makeText(context, "Error: ${result.error}", Toast.LENGTH_SHORT).show()
+                return@checkForUpdates
+            }
+            
+            if (!result.updateAvailable) {
+                Toast.makeText(context, "You're on the latest version (${result.currentVersion})", Toast.LENGTH_SHORT).show()
+                return@checkForUpdates
+            }
+            
+            // Show custom update dialog
+            kittoku.osc.update.UpdateDialog(
+                context = requireContext(),
+                result = result,
+                onUpdateClick = {
+                    result.downloadUrl?.let { url ->
+                        downloadUpdate(url)
+                    } ?: Toast.makeText(context, "No APK available", Toast.LENGTH_SHORT).show()
+                },
+                onDismiss = {
+                    // User chose "Later"
+                }
+            ).show()
+        }
+    }
+    
+    /**
+     * Download and install the update APK
+     */
+    @Suppress("DEPRECATION")
+    private fun downloadUpdate(url: String) {
+        val progressDialog = ProgressDialog(requireContext()).apply {
+            setMessage("Downloading update...")
+            setProgressStyle(ProgressDialog.STYLE_HORIZONTAL)
+            max = 100
+            setCancelable(false)
+            show()
+        }
+        
+        UpdateManager.downloadAndInstall(
+            requireContext(),
+            url,
+            onProgress = { progress ->
+                progressDialog.progress = progress
+            },
+            onComplete = { success, error ->
+                progressDialog.dismiss()
+                if (!success) {
+                    Toast.makeText(context, "Download failed: $error", Toast.LENGTH_LONG).show()
+                }
+            }
+        )
     }
 }

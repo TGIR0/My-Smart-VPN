@@ -75,6 +75,21 @@
         <kittoku.osc.preference.custom.LinkOscPreference/>
     </PreferenceCategory>
     
+    <!-- App Updates -->
+    <PreferenceCategory android:title="Updates">
+        <Preference
+            android:key="CHECK_FOR_UPDATES"
+            android:title="Check for Updates"
+            android:summary="Check GitHub for new versions"
+            android:icon="@android:drawable/ic_popup_sync" />
+        
+        <SwitchPreferenceCompat
+            android:key="AUTO_CHECK_UPDATES"
+            android:title="Auto-check on startup"
+            android:summary="Automatically check for updates when app starts"
+            android:defaultValue="true" />
+    </PreferenceCategory>
+    
     <!-- About & Licenses - Issue #7 Fix -->
     <PreferenceCategory android:title="About">
         <Preference

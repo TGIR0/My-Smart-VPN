@@ -40,6 +40,7 @@ import kittoku.osc.service.ACTION_VPN_STATUS_CHANGED
 import kittoku.osc.service.GeoIpService
 import kittoku.osc.service.SstpVpnService
 import kittoku.osc.preference.IranBypassHelper
+import kittoku.osc.repository.ConnectionStateManager
 
 class HomeFragment : Fragment(R.layout.fragment_home) {
     companion object {
@@ -91,6 +92,13 @@ class HomeFragment : Fragment(R.layout.fragment_home) {
             when {
                 status == "CONNECTING" -> {
                     currentState = ConnectionState.CONNECTING
+                    // Sync global state for other fragments
+                    ConnectionStateManager.setState(
+                        context,
+                        ConnectionStateManager.ConnectionState.CONNECTING,
+                        getStringPrefValue(OscPrefKey.HOME_HOSTNAME, prefs),
+                        isManual = false
+                    )
                     updateStatusUI("Connecting...")
                 }
                 status == "CONNECTED" -> {
@@ -98,6 +106,16 @@ class HomeFragment : Fragment(R.layout.fragment_home) {
                     isFailoverActive = false
                     attemptedServers.clear()
                     connectionAttemptRunnable?.let { connectionHandler.removeCallbacks(it) }
+                    
+                    // Sync global state for other fragments
+                    val serverName = getStringPrefValue(OscPrefKey.HOME_HOSTNAME, prefs)
+                    ConnectionStateManager.setState(
+                        context,
+                        ConnectionStateManager.ConnectionState.CONNECTED,
+                        serverName,
+                        isManual = ConnectionStateManager.isManualConnection
+                    )
+                    
                     updateStatusUI("CONNECTED")
                     updateServerInfoDisplay()
                     
@@ -107,6 +125,12 @@ class HomeFragment : Fragment(R.layout.fragment_home) {
                 status == "DISCONNECTED" -> {
                     currentState = ConnectionState.DISCONNECTED
                     connectionAttemptRunnable?.let { connectionHandler.removeCallbacks(it) }
+                    
+                    // Sync global state for other fragments
+                    ConnectionStateManager.setState(
+                        context,
+                        ConnectionStateManager.ConnectionState.DISCONNECTED
+                    )
                     
                     // Only retry if NOT user-initiated disconnect AND failover is active
                     if (!isUserInitiatedDisconnect && isFailoverActive) {
@@ -120,6 +144,12 @@ class HomeFragment : Fragment(R.layout.fragment_home) {
                 status.startsWith("ERROR") -> {
                     currentState = ConnectionState.DISCONNECTED
                     connectionAttemptRunnable?.let { connectionHandler.removeCallbacks(it) }
+                    
+                    // Sync global state for other fragments
+                    ConnectionStateManager.setState(
+                        context,
+                        ConnectionStateManager.ConnectionState.DISCONNECTED
+                    )
                     
                     // Retry on error if failover is active
                     if (isFailoverActive && !isUserInitiatedDisconnect) {
