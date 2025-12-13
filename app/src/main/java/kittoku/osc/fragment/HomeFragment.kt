@@ -50,6 +50,10 @@ class HomeFragment : Fragment(R.layout.fragment_home) {
         private const val TAG = "HomeFragment"
         private const val CONNECTION_TIMEOUT_MS = 15000L
         private const val MAX_FAILOVER_ATTEMPTS = 15  // Requirement #4: 15 retry attempts
+        
+        // SMART REFRESH: Cooldown to prevent ping spam on screen navigation
+        private const val PING_COOLDOWN_MS = 60 * 1000L  // 60 seconds
+        private var lastPingTimestamp = 0L  // Static to survive fragment recreation
     }
     
     // Activity-scoped ViewModels - shared with other fragments
@@ -311,14 +315,29 @@ class HomeFragment : Fragment(R.layout.fragment_home) {
     /**
      * REQUIREMENT #2: Background ping refresh on app launch
      * REQUIREMENT #1: Broadcasts updates for real-time UI sync
+     * 
+     * SMART REFRESH: Respects 60-second cooldown to prevent battery/data drain
+     * from frequent screen navigation (Home → ServerList → Home)
      */
     private fun refreshPingsInBackground() {
+        // SMART REFRESH: Check cooldown to prevent ping spam
+        val now = System.currentTimeMillis()
+        val timeSinceLastPing = now - lastPingTimestamp
+        
+        if (timeSinceLastPing < PING_COOLDOWN_MS) {
+            val remainingSeconds = (PING_COOLDOWN_MS - timeSinceLastPing) / 1000
+            Log.d(TAG, "Skipping ping (Cooldown active: ${remainingSeconds}s remaining)")
+            return
+        }
+        
         val cachedServers = kittoku.osc.repository.ServerCache.loadCachedServers(prefs)
         if (cachedServers.isNullOrEmpty()) {
             Log.d(TAG, "No cached servers to refresh pings for")
             return
         }
         
+        // Update timestamp BEFORE starting ping (prevents re-entry)
+        lastPingTimestamp = now
         Log.d(TAG, "Background ping refresh: ${cachedServers.size} servers")
         
         // Refresh pings in background with LIVE UI updates
